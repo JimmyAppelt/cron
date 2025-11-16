@@ -1,0 +1,37 @@
+name: Fetch Item Sales
+
+on:
+  schedule:
+    # Run every hour
+    - cron: '0 * * * *'
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/fetch-item-sales.yml'
+
+jobs:
+  fetch-item-sales:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          npm install @supabase/supabase-js
+
+      - name: Fetch and store item sales
+        env:
+          ENVATO_API_TOKEN: ${{ secrets.ENVATO_API_TOKEN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          node .github/scripts/fetch-item-sales.mjs
+        continue-on-error: false
