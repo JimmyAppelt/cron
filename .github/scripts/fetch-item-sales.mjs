@@ -51,7 +51,7 @@ async function fetchItemSales() {
   try {
     console.log('Fetching popular items from database...')
     const { data: popularItems, error: fetchError } = await supabase
-      .from('popular_themeforest')
+      .from('popular_themeforest_items_last_week')
       .select('id')
       .limit(50)
 
@@ -136,4 +136,3 @@ async function fetchItemSales() {
 }
 
 fetchItemSales()
-

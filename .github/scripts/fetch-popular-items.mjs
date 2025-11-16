@@ -40,12 +40,16 @@ async function fetchPopularItems() {
     }
 
     const data = await response.json()
-    const items = data.popular.items_last_week || []
+    const itemsLastWeek = data.popular.items_last_week || []
+    const itemsLastThreeMonths = data.popular.items_last_three_months || []
+    const authorsLastMonth = data.popular.authors_last_month || []
 
-    console.log(`Fetched ${items.length} popular items`)
+    console.log(`Fetched ${itemsLastWeek.length} items from last week`)
+    console.log(`Fetched ${itemsLastThreeMonths.length} items from last 3 months`)
+    console.log(`Fetched ${authorsLastMonth.length} authors from last month`)
 
-    // Upsert items into database
-    const itemsToUpsert = items.map((item) => ({
+    // Prepare items from last week
+    const itemsLastWeekToUpsert = itemsLastWeek.map((item) => ({
       id: item.id,
       item: item.item,
       url: item.url,
@@ -63,16 +67,73 @@ async function fetchPopularItems() {
       fetched_at: new Date().toISOString(),
     }))
 
-    const { error } = await supabase.from('popular_themeforest').upsert(itemsToUpsert, {
-      onConflict: 'id',
-    })
+    // Prepare items from last 3 months
+    const itemsLastThreeMonthsToUpsert = itemsLastThreeMonths.map((item) => ({
+      id: item.id,
+      item: item.item,
+      url: item.url,
+      user: item.user,
+      thumbnail: item.thumbnail,
+      sales: item.sales,
+      rating: item.rating,
+      rating_decimal: item.rating_decimal,
+      cost: item.cost,
+      uploaded_on: item.uploaded_on,
+      last_update: item.last_update,
+      tags: item.tags,
+      category: item.category,
+      live_preview_url: item.live_preview_url,
+      fetched_at: new Date().toISOString(),
+    }))
 
-    if (error) {
-      console.error('Error upserting items:', error)
+    // Prepare authors
+    const authorsToUpsert = authorsLastMonth.map((author) => ({
+      username: author.item,
+      sales: author.sales,
+      url: author.url,
+      image: author.image,
+      fetched_at: new Date().toISOString(),
+    }))
+
+    // Upsert items from last week
+    const { error: errorLastWeek } = await supabase
+      .from('popular_themeforest_items_last_week')
+      .upsert(itemsLastWeekToUpsert, {
+        onConflict: 'id',
+      })
+
+    if (errorLastWeek) {
+      console.error('Error upserting last week items:', errorLastWeek)
       process.exit(1)
     }
 
-    console.log(`Successfully stored ${items.length} popular items`)
+    // Upsert items from last 3 months
+    const { error: errorLastThreeMonths } = await supabase
+      .from('popular_themeforest_items_last_three_months')
+      .upsert(itemsLastThreeMonthsToUpsert, {
+        onConflict: 'id',
+      })
+
+    if (errorLastThreeMonths) {
+      console.error('Error upserting last 3 months items:', errorLastThreeMonths)
+      process.exit(1)
+    }
+
+    // Upsert authors
+    const { error: errorAuthors } = await supabase
+      .from('popular_themeforest_authors_last_month')
+      .upsert(authorsToUpsert, {
+        onConflict: 'username',
+      })
+
+    if (errorAuthors) {
+      console.error('Error upserting authors:', errorAuthors)
+      process.exit(1)
+    }
+
+    console.log(`Successfully stored ${itemsLastWeek.length} items from last week`)
+    console.log(`Successfully stored ${itemsLastThreeMonths.length} items from last 3 months`)
+    console.log(`Successfully stored ${authorsLastMonth.length} authors`)
   } catch (error) {
     console.error('FATAL ERROR fetching popular items:', error)
     console.error('Stack trace:', error.stack)
