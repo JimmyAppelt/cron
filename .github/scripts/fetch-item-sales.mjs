@@ -47,6 +47,29 @@ async function fetchItemDetails(itemId) {
   }
 }
 
+async function getLatestSales(itemId) {
+  try {
+    const { data, error } = await supabase
+      .from('item_sales')
+      .select('number_of_sales')
+      .eq('item_id', itemId)
+      .order('recorded_at', { ascending: false })
+      .limit(1)
+      .single()
+
+    if (error && error.code !== 'PGRST116') {
+      // PGRST116 = no rows returned (first time recording this item)
+      console.error(`Error fetching latest sales for item ${itemId}:`, error)
+      return null
+    }
+
+    return data?.number_of_sales ?? null
+  } catch (error) {
+    console.error(`Error in getLatestSales for item ${itemId}:`, error.message)
+    return null
+  }
+}
+
 async function fetchItemSales() {
   try {
     console.log('Fetching popular items from database...')
@@ -68,6 +91,7 @@ async function fetchItemSales() {
     console.log(`Found ${popularItems.length} popular items to process`)
 
     let successCount = 0
+    let skippedCount = 0
     let errorCount = 0
 
     for (const item of popularItems) {
@@ -78,10 +102,23 @@ async function fetchItemSales() {
         continue
       }
 
+      const currentSales = itemData.number_of_sales || 0
+
+      // Check if sales have increased
+      const latestSales = await getLatestSales(item.id)
+
+      if (latestSales !== null && currentSales <= latestSales) {
+        skippedCount++
+        console.log(`⊘ Skipped item ${item.id}: sales unchanged (${currentSales})`)
+        // Small delay even when skipping to avoid rate limiting
+        await new Promise((resolve) => setTimeout(resolve, 50))
+        continue
+      }
+
       const salesData = {
         item_id: item.id,
         name: itemData.name || '',
-        number_of_sales: itemData.number_of_sales || 0,
+        number_of_sales: currentSales,
         author_username: itemData.author_username || null,
         author_url: itemData.author_url || null,
         url: itemData.url || '',
@@ -111,21 +148,27 @@ async function fetchItemSales() {
         errorCount++
       } else {
         successCount++
-        console.log(`✓ Recorded sales for item ${item.id}: ${salesData.number_of_sales} sales`)
+        console.log(
+          `✓ Recorded sales for item ${item.id}: ${currentSales} sales (was ${latestSales ?? 'N/A'})`,
+        )
       }
 
       // Small delay to avoid rate limiting
       await new Promise((resolve) => setTimeout(resolve, 100))
     }
 
-    console.log(`\nCompleted: ${successCount} successful, ${errorCount} errors`)
+    console.log(
+      `\nCompleted: ${successCount} inserted, ${skippedCount} skipped, ${errorCount} errors`,
+    )
 
     // Exit with error code only if all items failed or there was a critical error
-    if (successCount === 0 && errorCount > 0) {
+    if (successCount === 0 && skippedCount === 0 && errorCount > 0) {
       console.error('ERROR: All items failed to process')
       process.exit(1)
     } else if (errorCount > 0) {
-      console.warn(`WARNING: ${errorCount} items failed, but ${successCount} succeeded`)
+      console.warn(
+        `WARNING: ${errorCount} items failed, but ${successCount} succeeded and ${skippedCount} skipped`,
+      )
       // Exit with 0 for partial success - workflow will show as success but with warnings
       process.exit(0)
     }
