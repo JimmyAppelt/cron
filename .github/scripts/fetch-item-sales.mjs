@@ -5,6 +5,7 @@ import { createClient } from '@supabase/supabase-js'
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 const ENVATO_API_TOKEN = process.env.ENVATO_API_TOKEN
+const BURST_DELAY = 250
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
   console.error('Error: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set')
@@ -111,7 +112,7 @@ async function fetchItemSales() {
         skippedCount++
         console.log(`⊘ Skipped item ${item.id}: sales unchanged (${currentSales})`)
         // Small delay even when skipping to avoid rate limiting
-        await new Promise((resolve) => setTimeout(resolve, 50))
+        await new Promise((resolve) => setTimeout(resolve, BURST_DELAY))
         continue
       }
 
@@ -154,7 +155,7 @@ async function fetchItemSales() {
       }
 
       // Small delay to avoid rate limiting
-      await new Promise((resolve) => setTimeout(resolve, 100))
+      await new Promise((resolve) => setTimeout(resolve, BURST_DELAY))
     }
 
     console.log(
