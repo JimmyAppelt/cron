@@ -74,22 +74,33 @@ async function getLatestSales(itemId) {
 async function fetchItemSales() {
   try {
     console.log('Fetching popular items from database...')
-    const { data: popularItems, error: fetchError } = await supabase
+    const { data: allPopularItems, error: fetchError } = await supabase
       .from('popular_themeforest_items_last_week')
-      .select('id')
-      .limit(50)
+      .select('id, sales')
+      .limit(200) // Fetch more to ensure we get the top 50 by sales
 
     if (fetchError) {
       console.error('Error fetching popular items:', fetchError)
       process.exit(1)
     }
 
-    if (!popularItems || popularItems.length === 0) {
+    if (!allPopularItems || allPopularItems.length === 0) {
       console.log('No popular items found in database')
       return
     }
 
-    console.log(`Found ${popularItems.length} popular items to process`)
+    // Sort by sales (highest first) and take top 50 most popular items
+    const popularItems = allPopularItems
+      .sort((a, b) => {
+        // Convert sales string to number
+        const salesA = parseInt(a.sales || '0', 10)
+        const salesB = parseInt(b.sales || '0', 10)
+        return salesB - salesA // Descending order (highest sales first)
+      })
+      .slice(0, 50)
+      .map((item) => ({ id: item.id })) // Keep only id for processing
+
+    console.log(`Found ${popularItems.length} most popular items to process`)
 
     let successCount = 0
     let skippedCount = 0
