@@ -48,25 +48,39 @@ async function fetchItemDetails(itemId) {
   }
 }
 
-async function getLatestSales(itemId) {
+async function getTodaysSalesRecord(itemId) {
   try {
+    // Get today's date boundaries in UTC
+    const now = new Date()
+    const todayStart = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0),
+    )
+    const todayEnd = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999),
+    )
+
     const { data, error } = await supabase
       .from('item_sales')
-      .select('number_of_sales')
+      .select('id, number_of_sales, recorded_at')
       .eq('item_id', itemId)
+      .gte('recorded_at', todayStart.toISOString())
+      .lte('recorded_at', todayEnd.toISOString())
       .order('recorded_at', { ascending: false })
       .limit(1)
       .single()
 
-    if (error && error.code !== 'PGRST116') {
-      // PGRST116 = no rows returned (first time recording this item)
-      console.error(`Error fetching latest sales for item ${itemId}:`, error)
+    if (error) {
+      // PGRST116 = no rows returned (no record for today yet)
+      if (error.code === 'PGRST116') {
+        return null // No record for today - will insert
+      }
+      console.error(`Error fetching today's sales for item ${itemId}:`, error)
       return null
     }
 
-    return data?.number_of_sales ?? null
+    return data // Returns { id, number_of_sales, recorded_at }
   } catch (error) {
-    console.error(`Error in getLatestSales for item ${itemId}:`, error.message)
+    console.error(`Error in getTodaysSalesRecord for item ${itemId}:`, error.message)
     return null
   }
 }
@@ -102,7 +116,8 @@ async function fetchItemSales() {
 
     console.log(`Found ${popularItems.length} most popular items to process`)
 
-    let successCount = 0
+    let insertCount = 0
+    let updateCount = 0
     let skippedCount = 0
     let errorCount = 0
 
@@ -116,12 +131,12 @@ async function fetchItemSales() {
 
       const currentSales = itemData.number_of_sales || 0
 
-      // Check if sales have increased
-      const latestSales = await getLatestSales(item.id)
+      // Check if we already have a record for today
+      const todaysRecord = await getTodaysSalesRecord(item.id)
 
-      if (latestSales !== null && currentSales <= latestSales) {
+      if (todaysRecord !== null && currentSales <= todaysRecord.number_of_sales) {
         skippedCount++
-        console.log(`⊘ Skipped item ${item.id}: sales unchanged (${currentSales})`)
+        console.log(`⊘ Skipped item ${item.id}: sales unchanged today (${currentSales})`)
         // Small delay even when skipping to avoid rate limiting
         await new Promise((resolve) => setTimeout(resolve, BURST_DELAY))
         continue
@@ -135,34 +150,41 @@ async function fetchItemSales() {
         author_url: itemData.author_url || null,
         url: itemData.url || '',
         updated_at: itemData.updated_at || null,
-        // attributes: itemData.attributes || null,
-        // wordpress_theme_metadata: itemData.wordpress_theme_metadata || null,
-        // description: itemData.description || null,
-        // site: itemData.site || null,
-        // classification: itemData.classification || null,
-        // classification_url: itemData.classification_url || null,
         price_cents: itemData.price_cents || null,
-        // author_image: itemData.author_image || null,
-        // summary: itemData.summary || null,
         rating: itemData.rating || null,
         rating_count: itemData.rating_count || null,
         published_at: itemData.published_at || null,
         trending: itemData.trending || false,
-        // tags: itemData.tags || [],
-        // previews: itemData.previews || null,
         recorded_at: new Date().toISOString(),
       }
 
-      const { error: insertError } = await supabase.from('item_sales').insert(salesData)
+      if (todaysRecord) {
+        // Update today's existing record
+        const { error: updateError } = await supabase
+          .from('item_sales')
+          .update(salesData)
+          .eq('id', todaysRecord.id)
 
-      if (insertError) {
-        console.error(`Error inserting sales data for item ${item.id}:`, insertError)
-        errorCount++
+        if (updateError) {
+          console.error(`Error updating sales data for item ${item.id}:`, updateError)
+          errorCount++
+        } else {
+          updateCount++
+          console.log(
+            `↻ Updated sales for item ${item.id}: ${currentSales} sales (was ${todaysRecord.number_of_sales})`,
+          )
+        }
       } else {
-        successCount++
-        console.log(
-          `✓ Recorded sales for item ${item.id}: ${currentSales} sales (was ${latestSales ?? 'N/A'})`,
-        )
+        // Insert new record for today
+        const { error: insertError } = await supabase.from('item_sales').insert(salesData)
+
+        if (insertError) {
+          console.error(`Error inserting sales data for item ${item.id}:`, insertError)
+          errorCount++
+        } else {
+          insertCount++
+          console.log(`✓ Inserted new sales record for item ${item.id}: ${currentSales} sales`)
+        }
       }
 
       // Small delay to avoid rate limiting
@@ -170,16 +192,17 @@ async function fetchItemSales() {
     }
 
     console.log(
-      `\nCompleted: ${successCount} inserted, ${skippedCount} skipped, ${errorCount} errors`,
+      `\nCompleted: ${insertCount} inserted, ${updateCount} updated, ${skippedCount} skipped, ${errorCount} errors`,
     )
 
+    const totalSuccess = insertCount + updateCount
     // Exit with error code only if all items failed or there was a critical error
-    if (successCount === 0 && skippedCount === 0 && errorCount > 0) {
+    if (totalSuccess === 0 && skippedCount === 0 && errorCount > 0) {
       console.error('ERROR: All items failed to process')
       process.exit(1)
     } else if (errorCount > 0) {
       console.warn(
-        `WARNING: ${errorCount} items failed, but ${successCount} succeeded and ${skippedCount} skipped`,
+        `WARNING: ${errorCount} items failed, but ${totalSuccess} succeeded and ${skippedCount} skipped`,
       )
       // Exit with 0 for partial success - workflow will show as success but with warnings
       process.exit(0)
