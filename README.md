@@ -1,1 +1,1 @@
-cron - reactivate before 31/5
+cron - reactivate before 30/6
